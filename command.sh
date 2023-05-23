@@ -1,5 +1,5 @@
 #RAFI OPTIMIZATION: your all gathers weren't being hidden!
-export LIBTPU_INIT_ARGS="--xla_enable_async_all_gather=true TPU_MEGACORE=MEGACORE_DENSE"
+#export LIBTPU_INIT_ARGS="--xla_enable_async_all_gather=true TPU_MEGACORE=MEGACORE_DENSE"
 python -m EasyLM.models.llama.llama_train \
     --mesh_dim='1,-1,1' \
     --total_steps=300 \

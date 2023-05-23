@@ -571,11 +571,13 @@ class FlaxLLaMABlock(nn.Module):
             param_dtype=self.param_dtype,
             precision=self.precision,
         )
+
+        # RAFI OPTIMIZATION
         self.feed_forward = FlaxLLaMAMLP(
-            self.config,
-            dtype=self.dtype,
-            param_dtype=self.param_dtype,
-            precision=self.precision,
+             self.config,
+             dtype=jax.dtypes.bfloat16,
+             param_dtype=self.param_dtype,
+             precision = "bfloat16"
         )
         self.attention_norm = RMSNorm(
             self.config.hidden_size,
@@ -618,7 +620,7 @@ class FlaxLLaMABlock(nn.Module):
         )
         hidden_states = hidden_states + feed_forward_hidden_states
 
-        return (hidden_states,) + attn_outputs[1:]
+        return (hidden_states, None)
 
 
 class FlaxLLaMAPreTrainedModel(FlaxPreTrainedModel):

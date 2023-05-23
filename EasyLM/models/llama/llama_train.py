@@ -24,6 +24,17 @@ from EasyLM.models.llama.llama_model import (
     LLaMAConfig, FlaxLLaMAForCausalLMModule
 )
 
+import datetime
+
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "0"
+
+import sys
+
+def calculate_num_params_from_pytree(params):
+  params_sizes = jax.tree_util.tree_map(jax.numpy.size, params)
+  total_parameters = jax.tree_util.tree_reduce(lambda x, y: x + y, params_sizes)
+  return total_parameters
 
 FLAGS, FLAGS_DEF = mlxu.define_flags_with_default(
     seed=42,
@@ -54,6 +65,9 @@ def main(argv):
     if FLAGS.initialize_jax_distributed:
         jax.distributed.initialize()
 
+
+
+
     variant = mlxu.get_user_flags(FLAGS, FLAGS_DEF)
     flags_config_dict = mlxu.user_flags_to_config_dict(FLAGS, FLAGS_DEF)
     logger = mlxu.WandBLogger(
@@ -62,6 +76,8 @@ def main(argv):
         enable=FLAGS.log_all_worker or (jax.process_index() == 0),
     )
     set_random_seed(FLAGS.seed)
+
+
 
     tokenizer = LLaMAConfig.get_tokenizer(FLAGS.tokenizer)
     dataset = DatasetFactory.load_dataset(FLAGS.train_dataset, tokenizer)
@@ -185,13 +201,6 @@ def main(argv):
         donate_argnums=(0, 1),
     )
 
-    sharded_eval_step = pjit(
-        eval_step,
-        in_shardings=(train_state_partition, PS(), PS()),
-        out_shardings=(PS(), PS()),
-        donate_argnums=(1,),
-    )
-
     def save_checkpoint(train_state, milestone=False):
         step = int(jax.device_get(train_state.step))
         metadata = dict(
@@ -233,36 +242,30 @@ def main(argv):
 
         step_counter = trange(start_step, FLAGS.total_steps, ncols=0)
 
+        last_tick = datetime.datetime.now()
+
+        num_model_params = calculate_num_params_from_pytree(train_state.params)
+
+        print(f"\nentering the loop with params {num_model_params/10**9}B")
+        TFLOPs = FLAGS.train_dataset.json_dataset.seq_length * FLAGS.train_dataset.json_dataset.batch_size * 6 * num_model_params
+
         for step, (batch, dataset_metrics) in zip(step_counter, dataset):
-            train_state, sharded_rng, metrics = sharded_train_step(
-                train_state, sharded_rng, batch
-            )
+            
+            for i in range(10):
+                print(f"start while loop {datetime.datetime.now()}", flush = True)
+                train_state, sharded_rng, metrics = sharded_train_step(
+                    train_state, sharded_rng, batch
+                )
+                jax.block_until_ready(train_state)
 
-            if step % FLAGS.log_freq == 0:
-                if FLAGS.eval_steps > 0:
-                    eval_metric_list = []
-                    for _ in range(FLAGS.eval_steps):
-                        eval_batch, _ = next(eval_iterator)
-                        sharded_rng, eval_metrics = sharded_eval_step(
-                            train_state, sharded_rng, eval_batch
-                        )
-                        eval_metric_list.append(eval_metrics)
-                    metrics.update(average_metrics(eval_metric_list))
-
-                log_metrics = {"step": step}
-                log_metrics.update(metrics)
-                log_metrics.update(dataset_metrics)
-                log_metrics = jax.device_get(log_metrics)
-                logger.log(log_metrics)
-                tqdm.write("\n" + pprint.pformat(log_metrics) + "\n")
-
-            if FLAGS.save_milestone_freq > 0 and (step + 1) % FLAGS.save_milestone_freq == 0:
-                save_checkpoint(train_state, milestone=True)
-            elif FLAGS.save_model_freq > 0 and (step + 1) % FLAGS.save_model_freq == 0:
-                save_checkpoint(train_state)
-
-        if FLAGS.save_model_freq > 0:
-            save_checkpoint(train_state)
+                new_last_tick = datetime.datetime.now()
+                time_seconds = (new_last_tick-last_tick).total_seconds()
+                last_tick = new_last_tick
+                print(f"Did TFLOP/sec={TFLOPs/time_seconds/10**12/len(jax.devices())} in {time_seconds}", flush = True)
+                if i == 1:
+                    jax.profiler.start_trace("gs://max-experiments/openlm_0000")
+            jax.profiler.stop_trace()
+            sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -572,13 +572,12 @@ class FlaxLLaMABlock(nn.Module):
             precision=self.precision,
         )
 
-        # RAFI OPTIMIZATION
         self.feed_forward = FlaxLLaMAMLP(
-             self.config,
-             dtype=jax.dtypes.bfloat16,
-             param_dtype=self.param_dtype,
-             precision = "bfloat16"
-        )
+            self.config,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
+            precision=self.precision,
+         )
         self.attention_norm = RMSNorm(
             self.config.hidden_size,
             eps=self.config.rms_norm_eps,
